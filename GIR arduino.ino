@@ -81,16 +81,17 @@ String lastCommand = "";
 unsigned long audioStartTime = 0;
 bool audioJustStarted = false;
 
-// ====== AUTO-SHUTDOWN FEATURE ======
+// ====== AUTO-SHUTDOWN FEATURES ======
 unsigned long lastActivityTime = 0;
-const unsigned long shutdownTimeout = 60000; // 30 seconds auto-shutdown
+const unsigned long shutdownTimeout = 60000; // 60 seconds auto-shutdown
 bool shutdownWarningPlayed = false;
-const unsigned long warningTime = 50000; // 5 seconds before shutdown
 
 // =====================================================
 // ====== Setup ======
 void setup() {
   Serial.begin(9600);
+
+  
   mySerial.begin(9600);
 
   if (!dfplayer.begin(mySerial)) {
@@ -276,12 +277,49 @@ void handleSerialCommands() {
 
   String command = Serial.readStringUntil('\n');
   command.trim();
+  
+  // Check for ON/OFF commands (case insensitive)
+  if (command.equalsIgnoreCase("on") || command.equalsIgnoreCase("robot on")) {
+    if (!eyesOn) {
+      Serial.println("🔌 Serial command: Robot ON");
+      eyesOn = true;
+      fadeEyesOn();
+      dfplayer.play(9); // Eyes ON sound
+      servosEnabled = true; // Enable servo control
+      startEyeAnimation(0); // Start idle breathing
+      resetActivityTimer(); // Reset auto-shutdown timer
+      EEPROM.update(EEPROM_ADDR, 1);
+      Serial.println("🤖 Robot is now ON");
+    } else {
+      Serial.println("🤖 Robot is already ON");
+    }
+    return;
+  }
+  
+  if (command.equalsIgnoreCase("off") || command.equalsIgnoreCase("robot off")) {
+    if (eyesOn) {
+      Serial.println("🔌 Serial command: Robot OFF");
+      eyesOn = false;
+      fadeEyesOff();
+      dfplayer.play(8); // Eyes OFF sound
+      detachAllServos();
+      servosEnabled = false; // Disable servo control
+      stopEyeAnimation();
+      EEPROM.update(EEPROM_ADDR, 0);
+      Serial.println("🤖 Robot is now OFF");
+    } else {
+      Serial.println("🤖 Robot is already OFF");
+    }
+    return;
+  }
+  
+  // Process other commands (original functionality)
   command.toLowerCase();
   if (command.length() == 0) return;
 
   // Check if servos are enabled (robot is ON)
   if (!servosEnabled) {
-    Serial.println("Robot is OFF. Double clap to turn on.");
+    Serial.println("Robot is OFF. Send 'on' or 'robot on' command or double clap to turn on.");
     return;
   }
 
@@ -724,25 +762,9 @@ void handleAutoShutdown() {
   unsigned long currentMillis = millis();
   unsigned long idleTime = currentMillis - lastActivityTime;
   
-  // Check for shutdown warning (5 seconds before shutdown)
-  if (idleTime >= warningTime && idleTime < shutdownTimeout && !shutdownWarningPlayed) {
-    // Play warning sound
-    dfplayer.play(8); // Eyes OFF sound as warning
-    Serial.println("⚠️ Warning: Robot will shut down in 5 seconds...");
-    shutdownWarningPlayed = true;
-    
-    // Blink eyes rapidly as warning
-    for (int i = 0; i < 3; i++) {
-      setEyes(50);
-      delay(200);
-      setEyes(currentEyeBrightness);
-      delay(200);
-    }
-  }
-  
   // Check for actual shutdown
   if (idleTime >= shutdownTimeout) {
-    Serial.println("⏰ Auto-shutdown: No activity for 30 seconds");
+    Serial.println("⏰ Auto-shutdown: No activity for 60 seconds");
     
     // Turn off robot
     eyesOn = false;
@@ -764,7 +786,7 @@ void handleAutoShutdown() {
   if (currentMillis - lastDisplayTime >= 5000) { // Every 5 seconds
     lastDisplayTime = currentMillis;
     unsigned long remainingTime = (shutdownTimeout - idleTime) / 1000;
-    if (remainingTime > 0 && remainingTime <= 30) {
+    if (remainingTime > 0 && remainingTime <= 60) {
       Serial.print("Auto-shutdown in: ");
       Serial.print(remainingTime);
       Serial.println(" seconds");
